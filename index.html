@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Color blindness simulator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='7' width='18' height='18' transform='rotate(45 16 16)' fill='%233f6fa8' stroke='%23e7eaf0' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@400..900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    color-scheme:dark;
+    --bg:#0d0f14; --panel:#14171f; --panel-edge:#232732;
+    --blue:#3f6fa8; --blue2:#5c7f9e; --steel:#7c8698;
+    --ink:#e7eaf0; --ink-soft:#727c8c; --line:#252a35;
+    --ok:#7fa88a; --danger:#c77a7a;
+    --font-ui:'Space Grotesk', system-ui, sans-serif;
+    --font-display:'Playfair Display', Georgia, serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  }
+  html{ scroll-padding-top:env(safe-area-inset-top,0px); height:100%; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100%; background:var(--bg); color:var(--ink);
+    font-family:var(--font-ui); display:flex; flex-direction:column;
+  }
+  header{
+    padding:22px 30px; border-bottom:4px double var(--blue2);
+    display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  }
+  header h1{
+    margin:0; font-family:var(--font-display); font-weight:800;
+    font-size:1.5rem; letter-spacing:.02em;
+  }
+  header p{ margin:0; font-size:.78rem; color:var(--ink-soft); }
+  .app{ display:flex; flex:1; flex-wrap:wrap; }
+  .app[data-mode="image"] .palette-only{ display:none !important; }
+  .app[data-mode="palette"] .image-only{ display:none !important; }
+
+  /* Stage */
+  .stage{
+    flex:3 1 520px; min-width:0; padding:40px; display:flex; align-items:stretch;
+    border-right:1px solid var(--line); position:relative;
+  }
+  .rail-frame{ position:relative; flex:1; display:flex; min-height:480px; min-width:0; }
+  .rail-frame::before, .rail-frame::after{ content:''; position:absolute; pointer-events:none; z-index:2; }
+  .rail-frame::before{ inset:8px; border:1px solid rgba(231,234,240,.6); }
+  .rail-frame::after{ inset:13px; border:1px solid rgba(92,127,158,.35); }
+  .rail-d{
+    position:absolute; width:10px; height:10px; z-index:3;
+    background:var(--blue); border:2px solid var(--bg);
+    transform:translate(-50%,-50%) rotate(45deg);
+    box-shadow:0 0 0 1px rgba(231,234,240,.5);
+  }
+  .rail-d.tl{top:8px; left:8px;} .rail-d.tr{top:8px; left:calc(100% - 8px);}
+  .rail-d.bl{top:calc(100% - 8px); left:8px;} .rail-d.br{top:calc(100% - 8px); left:calc(100% - 8px);}
+
+  .preview{
+    flex:1; margin:34px; display:flex; flex-direction:column; gap:16px;
+    min-width:0; position:relative; z-index:4;
+  }
+  .meta{ display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    font-size:.72rem; letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+  .meta .dims{ color:var(--blue2); }
+  .meta .tip{ color:var(--ink-soft); }
+
+  /* Palette view */
+  .palette-view{ flex:1; display:flex; flex-direction:column; min-width:0; }
+  .rows{ display:flex; flex-direction:column; gap:18px; overflow-x:auto; padding-bottom:4px; }
+  .row{ display:flex; flex-direction:column; gap:8px; }
+  .row-label{
+    font-size:.66rem; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; gap:10px; align-items:baseline;
+  }
+  .row-label b{ font-weight:500; color:var(--ink); letter-spacing:.2em; }
+  .row.sim-row .row-label b{ color:var(--blue2); }
+  .row-label span{ text-transform:none; letter-spacing:.04em; }
+  .cells{ display:grid; gap:8px; }
+  .row.sim-row{ border-top:1px solid var(--line); padding-top:16px; }
+
+  .sw, .sim{
+    min-width:0; display:flex; flex-direction:column;
+    background:var(--panel); border:1px solid var(--line);
+    box-shadow:inset 0 0 0 3px var(--panel), inset 0 0 0 4px var(--panel-edge);
+  }
+  .chip{ margin:6px 6px 0; position:relative; min-height:120px; }
+  .rows.many .sim .chip{ min-height:54px; }
+  .chip.o{ cursor:pointer; }
+  .chip.o:focus-within{ outline:1px solid #fff; outline-offset:2px; }
+  .picker{
+    position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer;
+    border:0; padding:0; margin:0;
+  }
+  .sim.clash .chip::after{
+    content:''; position:absolute; top:9px; right:9px; width:9px; height:9px;
+    background:var(--danger); border:2px solid var(--bg); transform:rotate(45deg);
+    box-shadow:0 0 0 1px rgba(231,234,240,.6);
+  }
+  .sim.clash{ border-color:rgba(199,122,122,.55); }
+
+  .plate{ padding:10px 8px 8px 10px; display:flex; align-items:center; gap:6px; min-width:0; }
+  .hexin{
+    flex:1; min-width:0; background:none; border:0; border-bottom:1px solid transparent;
+    color:var(--ink); font-family:var(--font-mono); font-size:.88rem; font-weight:500;
+    letter-spacing:.02em; padding:2px 0; text-transform:uppercase; border-radius:0;
+  }
+  .hexin:hover{ border-bottom-color:var(--line); }
+  .hexin:focus{ outline:none; border-bottom-color:var(--blue2); }
+  .hexin.bad{ color:var(--danger); border-bottom-color:var(--danger); }
+  .simhex{
+    padding:8px 10px 8px; font-family:var(--font-mono); font-size:.72rem; color:var(--ink-soft);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .ic{
+    width:28px; height:28px; flex:none; display:grid; place-items:center; cursor:pointer;
+    background:transparent; border:1px solid var(--line); color:var(--ink-soft); padding:0;
+  }
+  .ic svg{ width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:square; }
+  .ic:hover{ color:var(--ink); border-color:var(--blue2); }
+  .ic:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  .ic:disabled{ opacity:.3; cursor:not-allowed; }
+  .ic:disabled:hover{ color:var(--ink-soft); border-color:var(--line); }
+
+  /* Image view */
+  .image-view{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:360px; }
+  .empty{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    text-align:center; padding:30px 20px; border:1px solid var(--line);
+    box-shadow:inset 0 0 0 5px var(--bg), inset 0 0 0 6px var(--panel-edge);
+  }
+  .empty-title{ margin:0; font-family:var(--font-display); font-weight:700; font-size:1.3rem; }
+  .empty p{ margin:0; font-size:.8rem; color:var(--ink-soft); max-width:36ch; line-height:1.5; }
+  .empty-acts{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; justify-content:center; }
+  .empty-acts button.tool{ padding:12px 18px; }
+
+  .imgstage{ flex:1; display:flex; align-items:center; justify-content:center; min-width:0; }
+  .imgstage[hidden]{ display:none; }
+  .compare{ position:relative; max-width:100%; }
+  .compare figure{ margin:0; position:relative; }
+  .compare canvas{ display:block; }
+  .compare figcaption{
+    font-size:.66rem; letter-spacing:.2em; text-transform:uppercase; color:var(--ink);
+  }
+  .compare.split{ display:inline-block; touch-action:none; cursor:ew-resize; user-select:none; -webkit-user-select:none; }
+  .compare.split .fig-s canvas{ max-width:100%; max-height:min(62vh,640px); width:auto; height:auto; }
+  .compare.split .fig-o{ position:absolute; inset:0; clip-path:inset(0 calc(100% - var(--x,50%)) 0 0); z-index:1; }
+  .compare.split .fig-o canvas{ width:100%; height:100%; }
+  .compare.split figcaption{
+    position:absolute; top:10px; padding:5px 8px; background:rgba(13,15,20,.82);
+    border:1px solid var(--line); pointer-events:none;
+  }
+  .compare.split .fig-o figcaption{ left:10px; }
+  .compare.split .fig-s figcaption{ right:10px; color:#fff; border-color:var(--blue2); }
+  .handle{
+    position:absolute; top:0; bottom:0; left:var(--x,50%); width:26px; margin-left:-13px;
+    background:none; border:0; padding:0; cursor:ew-resize; z-index:2;
+  }
+  .handle::before{
+    content:''; position:absolute; top:0; bottom:0; left:12px; width:1px;
+    background:rgba(231,234,240,.85); box-shadow:0 0 0 1px rgba(13,15,20,.5);
+  }
+  .handle span{
+    position:absolute; top:50%; left:50%; width:14px; height:14px;
+    background:var(--blue); border:2px solid var(--bg);
+    transform:translate(-50%,-50%) rotate(45deg);
+    box-shadow:0 0 0 1px rgba(231,234,240,.7);
+  }
+  .handle:focus-visible{ outline:none; }
+  .handle:focus-visible span{ box-shadow:0 0 0 2px #fff; }
+  .compare.side{ display:grid; grid-template-columns:1fr 1fr; gap:12px; width:100%; align-items:start; }
+  .compare.side canvas{ width:100%; height:auto; max-height:62vh; object-fit:contain; }
+  .compare.side figcaption{ margin-top:8px; color:var(--ink-soft); }
+  .compare.side .fig-s figcaption{ color:var(--blue2); }
+  .compare.side .handle{ display:none; }
+
+  .drop-hint{
+    position:absolute; inset:40px; z-index:10; display:none; align-items:center; justify-content:center;
+    background:rgba(13,15,20,.88); border:1px solid var(--blue2);
+    box-shadow:inset 0 0 0 5px rgba(13,15,20,.88), inset 0 0 0 6px var(--blue);
+    font-family:var(--font-display); font-size:1.3rem; font-weight:700; pointer-events:none;
+  }
+  .stage.dragging .drop-hint{ display:flex; }
+
+  /* Side panel */
+  .side{
+    flex:1 1 300px; min-width:0; padding:30px 28px;
+    display:flex; flex-direction:column; gap:28px; overflow:auto;
+  }
+  .group-title{
+    display:flex; align-items:center; gap:10px;
+    text-transform:uppercase; letter-spacing:.26em; font-size:.66rem;
+    color:var(--ink-soft); margin-bottom:12px;
+  }
+  .group-title::before{ content:''; width:6px; height:6px; background:var(--blue); transform:rotate(45deg); flex:none; }
+  .group-title::after{ content:''; flex:1; height:3px; border-top:1px solid var(--blue); border-bottom:1px solid var(--blue2); }
+  .hint{ font-size:.72rem; color:var(--ink-soft); line-height:1.5; margin-top:10px; }
+
+  button.tool{
+    --c:var(--blue2);
+    border:1px solid var(--line); background:
+      linear-gradient(var(--c),var(--c)) top left/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) top left/1px 8px no-repeat,
+      linear-gradient(var(--c),var(--c)) top right/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) top right/1px 8px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left/1px 8px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right/1px 8px no-repeat,
+      var(--panel);
+    box-shadow:inset 0 0 0 3px var(--panel), inset 0 0 0 4px var(--panel-edge);
+    color:var(--ink); font-family:var(--font-ui); font-size:.78rem;
+    letter-spacing:.06em; padding:13px 8px; cursor:pointer;
+  }
+  button.tool:hover{ --c:#fff; }
+  button.tool:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  button.tool.active{ --c:var(--blue); background-color:rgba(63,111,168,.2); color:#fff; }
+  button.tool:disabled{ opacity:.35; cursor:not-allowed; --c:var(--line); }
+  .btn-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .type-grid button.tool{ display:flex; flex-direction:column; align-items:center; gap:3px; padding:12px 8px; }
+  .type-grid button.tool small{ font-size:.64rem; color:var(--ink-soft); letter-spacing:.04em; }
+  .type-grid button.tool.active small{ color:#b9c7d8; }
+  .type-grid .span{ grid-column:1 / -1; }
+
+  .mode-grid button.tool{ padding:16px 8px; font-size:.82rem; }
+
+  .sev-row{ display:grid; grid-template-columns:1fr auto; gap:14px; align-items:center; }
+  .count{
+    min-width:72px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    border:1px solid var(--line); padding:6px 10px;
+  }
+  .count b{ font-family:var(--font-display); font-weight:700; font-size:1.35rem; line-height:1; font-variant-numeric:tabular-nums; }
+  .count span{ font-size:.62rem; color:var(--ink-soft); margin-top:3px; }
+  .count-row{ display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:stretch; }
+
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:28px; background:transparent; margin:0; cursor:pointer; }
+  input[type=range]::-webkit-slider-runnable-track{ height:4px; border-top:1px solid var(--blue); border-bottom:1px solid var(--blue2); background:transparent; }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:13px; height:13px; margin-top:-6px;
+    background:var(--blue); border:2px solid var(--bg); transform:rotate(45deg);
+    box-shadow:0 0 0 1px rgba(231,234,240,.7);
+  }
+  input[type=range]::-moz-range-track{ height:2px; border-top:1px solid var(--blue); border-bottom:1px solid var(--blue2); background:transparent; }
+  input[type=range]::-moz-range-thumb{
+    width:10px; height:10px; border-radius:0; background:var(--blue); border:2px solid var(--bg);
+    transform:rotate(45deg); box-shadow:0 0 0 1px rgba(231,234,240,.7);
+  }
+  input[type=range]:focus-visible{ outline:1px solid #fff; outline-offset:4px; }
+
+  textarea{
+    width:100%; min-height:74px; resize:vertical; border-radius:0;
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    box-shadow:inset 0 0 0 3px var(--panel), inset 0 0 0 4px var(--panel-edge);
+    font-family:var(--font-mono); font-size:.78rem; padding:12px 14px; line-height:1.5;
+  }
+  textarea:hover{ border-color:var(--blue2); }
+  textarea:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  textarea::placeholder{ color:var(--ink-soft); }
+
+  button.generate{
+    width:100%; background:var(--blue); border:1px solid var(--blue2); color:#fff;
+    font-family:var(--font-ui); font-size:.8rem; font-weight:500; text-transform:uppercase; letter-spacing:.24em;
+    padding:22px 10px; cursor:pointer;
+    box-shadow:inset 0 0 0 4px var(--blue), inset 0 0 0 5px rgba(231,234,240,.4);
+  }
+  button.generate:hover{ background:#4a7cb8; box-shadow:inset 0 0 0 4px #4a7cb8, inset 0 0 0 5px rgba(231,234,240,.55); }
+  button.generate:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  button.plain{
+    width:100%; margin-top:8px; background:transparent; border:1px solid var(--line);
+    color:var(--ink-soft); font-family:var(--font-ui); font-size:.68rem; text-transform:uppercase;
+    letter-spacing:.2em; padding:11px 10px; cursor:pointer;
+  }
+  button.plain:hover{ color:var(--ink); border-color:var(--blue2); }
+  button.plain:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  button.plain:disabled{ opacity:.35; cursor:not-allowed; }
+  button.plain:disabled:hover{ color:var(--ink-soft); border-color:var(--line); }
+  .status{ font-size:.72rem; color:var(--ink-soft); margin-top:8px; min-height:1.1em; }
+
+  /* Clash list */
+  .clashes{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .clashes li{
+    display:flex; align-items:center; gap:12px; padding:9px 10px;
+    border:1px solid var(--line); font-size:.74rem; line-height:1.4;
+  }
+  .clashes li.sev-hard{ border-color:rgba(199,122,122,.5); }
+  .pair{ display:flex; flex:none; }
+  .pair i{ width:18px; height:30px; display:block; }
+  .pair i + i{ margin-left:2px; }
+  .pair.sim-pair{ margin-left:-6px; }
+  .clashes .codes{ font-family:var(--font-mono); font-size:.72rem; }
+  .clashes small{ display:block; color:var(--ink-soft); font-size:.68rem; }
+  .clashes li.sev-hard small b{ color:var(--danger); font-weight:500; }
+  .clashes li.sev-close small b{ color:var(--steel); font-weight:500; }
+  .clashes .none{ border-color:rgba(127,168,138,.45); color:var(--ok); }
+
+  @media (max-width:760px){
+    header{ padding:18px 20px; }
+    .stage{ border-right:none; border-bottom:1px solid var(--line); padding:18px; flex-basis:100%; }
+    .rail-frame{ min-height:0; }
+    .preview{ margin:30px 24px; }
+    .chip{ min-height:84px; }
+    .image-view{ min-height:260px; }
+    .compare.side{ grid-template-columns:1fr; }
+    .drop-hint{ inset:18px; }
+    .side{ padding:24px 20px; flex-basis:100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Color blindness simulator</h1>
+  <p>See how a palette or an image looks with each type of color vision deficiency.</p>
+</header>
+
+<div class="app" id="app" data-mode="palette">
+  <div class="stage" id="stage">
+    <div class="rail-frame">
+      <div class="rail-d tl"></div><div class="rail-d tr"></div>
+      <div class="rail-d bl"></div><div class="rail-d br"></div>
+      <div class="preview">
+        <div class="meta">
+          <div class="dims" id="dims"></div>
+          <div class="tip" id="tip"></div>
+        </div>
+
+        <div class="palette-view palette-only" id="paletteView" aria-label="Palette comparison"></div>
+
+        <div class="image-view image-only">
+          <div class="empty" id="empty">
+            <p class="empty-title">Drop an image here</p>
+            <p>You can also paste an image, choose a file, or load the sample plate to try it out.</p>
+            <div class="empty-acts">
+              <button class="tool" id="btnChoose2">Choose file</button>
+              <button class="tool" id="btnSample2">Load sample plate</button>
+            </div>
+          </div>
+          <div class="imgstage" id="imgstage" hidden>
+            <div class="compare split" id="compare">
+              <figure class="fig-o"><canvas id="cvOrig"></canvas><figcaption>Original</figcaption></figure>
+              <figure class="fig-s"><canvas id="cvSim"></canvas><figcaption id="simCap"></figcaption></figure>
+              <button class="handle" id="handle" role="slider" aria-label="Divider position"
+                aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="drop-hint">Drop to load the image</div>
+  </div>
+
+  <div class="side">
+    <div>
+      <div class="group-title">Mode</div>
+      <div class="btn-grid mode-grid" id="modeGrid" role="group" aria-label="What to simulate">
+        <button class="tool active" data-mode="palette" aria-pressed="true">Palette</button>
+        <button class="tool" data-mode="image" aria-pressed="false">Image</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="group-title">Condition</div>
+      <div class="btn-grid type-grid" id="typeGrid" role="group" aria-label="Type of color blindness">
+        <button class="tool" data-type="protan" aria-pressed="false">Red-blind<small>protan</small></button>
+        <button class="tool active" data-type="deutan" aria-pressed="true">Green-blind<small>deutan</small></button>
+        <button class="tool" data-type="tritan" aria-pressed="false">Blue-blind<small>tritan</small></button>
+        <button class="tool" data-type="achromat" aria-pressed="false">No color<small>achromat</small></button>
+        <button class="tool span palette-only" data-type="all" aria-pressed="false">All four types<small>one row each</small></button>
+      </div>
+      <div class="hint" id="typeHint"></div>
+    </div>
+
+    <div>
+      <div class="group-title">Severity</div>
+      <div class="sev-row">
+        <input type="range" id="sev" min="0" max="100" step="5" value="100" aria-label="Severity">
+        <div class="count" aria-live="polite"><b id="sevVal">100</b><span>percent</span></div>
+      </div>
+      <div class="hint">100% is the full loss of one cone type. Lower values approximate the milder forms, which are more common.</div>
+    </div>
+
+    <!-- Palette mode -->
+    <div class="palette-only">
+      <div class="group-title">Colors</div>
+      <div class="count-row">
+        <button class="tool" id="btnRemove">Remove</button>
+        <div class="count" aria-live="polite"><b id="countVal">5</b><span>of 8</span></div>
+        <button class="tool" id="btnAdd">Add</button>
+      </div>
+      <div class="hint">Click a color to pick a new one, or type a HEX code under it.</div>
+    </div>
+
+    <div class="palette-only">
+      <div class="group-title">Paste a palette</div>
+      <textarea id="paste" spellcheck="false" placeholder="#D64545, #3FA34D, #E8B53A" aria-label="HEX codes to load"></textarea>
+      <button class="plain" id="btnApply">Load these colors</button>
+      <div class="hint">Up to 8 HEX codes separated by commas, spaces or new lines.</div>
+    </div>
+
+    <div class="palette-only">
+      <div class="group-title">Check</div>
+      <ul class="clashes" id="clashes" aria-live="polite"></ul>
+      <div class="hint">Flags pairs that are clearly different in the original but look alike in the simulation. Measured as perceptual distance in the OKLab color space.</div>
+    </div>
+
+    <div class="palette-only">
+      <div class="group-title">Export</div>
+      <button class="plain" id="btnCopy">Copy simulated HEX codes</button>
+      <div class="status" id="statusP" aria-live="polite"></div>
+    </div>
+
+    <!-- Image mode -->
+    <div class="image-only">
+      <div class="group-title">Image</div>
+      <button class="generate" id="btnChoose">Choose image</button>
+      <button class="plain" id="btnSample">Load sample plate</button>
+      <div class="hint">PNG, JPG, WebP or GIF. Large images are scaled to 1600 px on the long side. Nothing is uploaded; it all runs in your browser.</div>
+    </div>
+
+    <div class="image-only">
+      <div class="group-title">View</div>
+      <div class="btn-grid" id="viewGrid" role="group" aria-label="Comparison view">
+        <button class="tool active" data-view="split" aria-pressed="true">Split</button>
+        <button class="tool" data-view="side" aria-pressed="false">Side by side</button>
+      </div>
+    </div>
+
+    <div class="image-only">
+      <div class="group-title">Export</div>
+      <button class="plain" id="btnPng" disabled>Download simulated PNG</button>
+      <div class="status" id="statusI" aria-live="polite"></div>
+    </div>
+
+    <div class="hint">Simulation uses the Machado, Oliveira and Fernandes (2009) model in linear RGB. It shows the typical experience; every person's vision differs.</div>
+  </div>
+</div>
+
+<input type="file" id="file" accept="image/*" hidden>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const MIN = 2, MAX = 8, MAX_SIDE = 1600;
+
+  /* ---------- condition data ---------- */
+  const TYPES = {
+    protan:  { full:'Protanopia',    mild:'Protanomaly',
+      hint:'Red cones missing or shifted. Reds look darker and blend with greens and browns. Affects about 1% of men.' },
+    deutan:  { full:'Deuteranopia',  mild:'Deuteranomaly',
+      hint:'Green cones missing or shifted. The most common type: reds, oranges and greens blend together. Affects about 5% of men.' },
+    tritan:  { full:'Tritanopia',    mild:'Tritanomaly',
+      hint:'Blue cones missing or shifted. Blue blends with green, and yellow with pink or light grey. Rare.' },
+    achromat:{ full:'Achromatopsia', mild:'Partial achromatopsia',
+      hint:'Little or no color perception, only lightness. Very rare, but a good test for palettes that rely on hue alone.' }
+  };
+  const ALL_HINT = 'Every type at the current severity, one row each. Use it to spot the weakest pair across all conditions.';
+  const ORDER = ['protan', 'deutan', 'tritan', 'achromat'];
+
+  /* Machado et al. 2009, severity 1.0, applied to linear RGB */
+  const MACHADO = {
+    protan:  [[0.152286, 1.052583,-0.204868],[0.114503, 0.786281, 0.099216],[-0.003882,-0.048116, 1.051998]],
+    deutan:  [[0.367322, 0.860646,-0.227968],[0.280085, 0.672501, 0.047413],[-0.011820, 0.042940, 0.968881]],
+    tritan:  [[1.255528,-0.076749,-0.178779],[-0.078411, 0.930809, 0.147602],[0.004733, 0.691367, 0.303900]],
+    achromat:[[0.2126, 0.7152, 0.0722],[0.2126, 0.7152, 0.0722],[0.2126, 0.7152, 0.0722]]
+  };
+  function matrix(t, s){
+    return MACHADO[t].map((row, r) => row.map((v, c) => (r === c ? 1 - s : 0) + s * v));
+  }
+  function conditionName(t, sev){
+    if(sev <= 0) return 'Normal vision';
+    return sev >= 100 ? TYPES[t].full : TYPES[t].mild + ', ' + sev + '%';
+  }
+
+  /* ---------- color math ---------- */
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const toLinF = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  const toSrgbF = v => { v = clamp(v, 0, 1); return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; };
+  const LIN = new Float32Array(256);
+  for(let i = 0; i < 256; i++) LIN[i] = toLinF(i / 255);
+  const ENC_N = 4096, ENC = new Uint8ClampedArray(ENC_N);
+  for(let i = 0; i < ENC_N; i++) ENC[i] = Math.round(toSrgbF(i / (ENC_N - 1)) * 255);
+
+  const toHex = rgb => '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+  function parseHex(str){
+    let s = String(str).trim().replace(/^#/, '');
+    if(/^[0-9a-f]{3}$/i.test(s)) s = s.split('').map(c => c + c).join('');
+    if(!/^[0-9a-f]{6}$/i.test(s)) return null;
+    return [0, 2, 4].map(i => parseInt(s.slice(i, i + 2), 16));
+  }
+  function simulate(rgb, M){
+    const r = LIN[rgb[0]], g = LIN[rgb[1]], b = LIN[rgb[2]];
+    return M.map(row => Math.round(toSrgbF(row[0] * r + row[1] * g + row[2] * b) * 255));
+  }
+  function oklab(rgb){
+    const r = LIN[rgb[0]], g = LIN[rgb[1]], b = LIN[rgb[2]];
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [
+      0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    ];
+  }
+  const dist = (a, b) => { const A = oklab(a), B = oklab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  function hslToRgb(h, s, l){
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)].map(v => Math.round(v * 255));
+  }
+
+  /* Thresholds in OKLab distance */
+  const HARD = 0.055, CLOSE = 0.09, WAS_CLEAR = 0.1;
+
+  /* ---------- state ---------- */
+  const state = {
+    mode:'palette', type:'deutan', lastType:'deutan', sev:100,
+    colors:['#D64545', '#3FA34D', '#E8B53A', '#3F6FA8', '#8A5CC2'].map(h => ({ hex:h, rgb:parseHex(h) })),
+    img:null, view:'split', split:50
+  };
+  const activeTypes = () => state.type === 'all' ? ORDER.slice() : [state.type];
+  const say = msg => { $(state.mode === 'palette' ? 'statusP' : 'statusI').textContent = msg; };
+
+  const ICON_X = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>';
+
+  /* ---------- palette: structure ---------- */
+  function renderPalette(){
+    const n = state.colors.length, types = activeTypes();
+    const cols = 'grid-template-columns:repeat(' + n + ', minmax(78px, 1fr))';
+    let h = '<div class="rows' + (types.length > 1 ? ' many' : '') + '">';
+
+    h += '<div class="row"><div class="row-label"><b>Original</b></div><div class="cells" style="' + cols + '">';
+    state.colors.forEach((c, i) => {
+      h += '<div class="sw">' +
+        '<div class="chip o" data-i="' + i + '"><input type="color" class="picker" data-i="' + i + '" aria-label="Pick color ' + (i + 1) + '"></div>' +
+        '<div class="plate">' +
+          '<input class="hexin" data-i="' + i + '" spellcheck="false" maxlength="7" aria-label="HEX code for color ' + (i + 1) + '">' +
+          '<button class="ic del" data-i="' + i + '" title="Remove" aria-label="Remove color ' + (i + 1) + '"' + (n <= MIN ? ' disabled' : '') + '>' + ICON_X + '</button>' +
+        '</div></div>';
+    });
+    h += '</div></div>';
+
+    types.forEach(t => {
+      h += '<div class="row sim-row"><div class="row-label"><b data-label="' + t + '"></b></div><div class="cells" style="' + cols + '">';
+      state.colors.forEach((c, i) => {
+        h += '<div class="sim" data-t="' + t + '" data-i="' + i + '"><div class="chip s"></div><div class="simhex"></div></div>';
+      });
+      h += '</div></div>';
+    });
+    h += '</div>';
+    $('paletteView').innerHTML = h;
+
+    $('countVal').textContent = n;
+    $('btnAdd').disabled = n >= MAX;
+    $('btnRemove').disabled = n <= MIN;
+    paint();
+  }
+
+  /* ---------- palette: colors only (keeps the color picker open while dragging) ---------- */
+  function paint(){
+    const view = $('paletteView'), types = activeTypes();
+    state.colors.forEach((c, i) => {
+      const chip = view.querySelector('.chip.o[data-i="' + i + '"]');
+      if(!chip) return;
+      chip.style.background = c.hex;
+      const pk = chip.querySelector('.picker');
+      if(pk.value.toUpperCase() !== c.hex) pk.value = c.hex.toLowerCase();
+      const hx = view.querySelector('.hexin[data-i="' + i + '"]');
+      if(document.activeElement !== hx){ hx.value = c.hex; hx.classList.remove('bad'); }
+    });
+
+    const clashes = [];
+    types.forEach(t => {
+      const M = matrix(t, state.sev / 100);
+      const sims = state.colors.map(c => simulate(c.rgb, M));
+      const flagged = new Set();
+      for(let a = 0; a < sims.length; a++){
+        for(let b = a + 1; b < sims.length; b++){
+          const before = dist(state.colors[a].rgb, state.colors[b].rgb);
+          const after = dist(sims[a], sims[b]);
+          if(before >= WAS_CLEAR && after < CLOSE){
+            clashes.push({ t, a, b, after, hard:after < HARD, sa:sims[a], sb:sims[b] });
+            if(after < HARD){ flagged.add(a); flagged.add(b); }
+          }
+        }
+      }
+      sims.forEach((rgb, i) => {
+        const cell = view.querySelector('.sim[data-t="' + t + '"][data-i="' + i + '"]');
+        if(!cell) return;
+        const hex = toHex(rgb);
+        cell.querySelector('.chip').style.background = hex;
+        cell.querySelector('.simhex').textContent = hex;
+        cell.classList.toggle('clash', flagged.has(i));
+        cell.title = flagged.has(i) ? 'Hard to tell apart from another color in this row' : '';
+      });
+      const lab = view.querySelector('[data-label="' + t + '"]');
+      if(lab) lab.textContent = conditionName(t, state.sev);
+    });
+
+    renderClashes(clashes);
+    updateMeta();
+  }
+
+  function renderClashes(list){
+    const ul = $('clashes');
+    list.sort((x, y) => x.after - y.after);
+    if(!list.length){
+      ul.innerHTML = '<li class="none">No clashes. Every pair stays distinguishable' +
+        (state.sev > 0 ? ' in this simulation.' : '.') + '</li>';
+      return;
+    }
+    const multi = state.type === 'all';
+    ul.innerHTML = list.slice(0, 8).map(c => {
+      const A = state.colors[c.a], B = state.colors[c.b];
+      return '<li class="' + (c.hard ? 'sev-hard' : 'sev-close') + '">' +
+        '<span class="pair" title="Original"><i style="background:' + A.hex + '"></i><i style="background:' + B.hex + '"></i></span>' +
+        '<span class="pair sim-pair" title="Simulated"><i style="background:' + toHex(c.sa) + '"></i><i style="background:' + toHex(c.sb) + '"></i></span>' +
+        '<span><span class="codes">' + A.hex + ' and ' + B.hex + '</span>' +
+        '<small><b>' + (c.hard ? 'Hard to tell apart' : 'Close') + '</b>' +
+        (multi ? ' with ' + conditionName(c.t, state.sev).toLowerCase() : '') + '</small></span></li>';
+    }).join('') + (list.length > 8 ? '<li>' + (list.length - 8) + ' more pairs not shown.</li>' : '');
+  }
+
+  function setColor(i, rgb){
+    state.colors[i] = { rgb, hex:toHex(rgb) };
+    paint();
+  }
+
+  /* palette events (delegated) */
+  $('paletteView').addEventListener('input', e => {
+    const i = +e.target.dataset.i;
+    if(e.target.classList.contains('picker')){
+      setColor(i, parseHex(e.target.value));
+    } else if(e.target.classList.contains('hexin')){
+      const rgb = parseHex(e.target.value);
+      e.target.classList.toggle('bad', !rgb && e.target.value.replace('#', '').length >= 6);
+      if(rgb && e.target.value.replace('#', '').length === 6) setColor(i, rgb);
+    }
+  });
+  $('paletteView').addEventListener('change', e => {
+    if(!e.target.classList.contains('hexin')) return;
+    const i = +e.target.dataset.i, rgb = parseHex(e.target.value);
+    if(rgb){ setColor(i, rgb); e.target.value = state.colors[i].hex; e.target.classList.remove('bad'); say(''); }
+    else { e.target.value = state.colors[i].hex; e.target.classList.remove('bad'); say('Use a HEX code like #3F6FA8.'); }
+  });
+  $('paletteView').addEventListener('keydown', e => {
+    if(e.key === 'Enter' && e.target.classList.contains('hexin')) e.target.blur();
+  });
+  $('paletteView').addEventListener('focusout', e => {
+    if(e.target.classList.contains('hexin')) paint();
+  });
+  $('paletteView').addEventListener('click', e => {
+    const del = e.target.closest('.del'); if(!del || del.disabled) return;
+    const [gone] = state.colors.splice(+del.dataset.i, 1);
+    renderPalette(); say('Removed ' + gone.hex);
+  });
+
+  function randomColor(){
+    const h = Math.random() * 360;
+    return hslToRgb(h, 45 + Math.random() * 35, 38 + Math.random() * 24);
+  }
+  $('btnAdd').addEventListener('click', () => {
+    if(state.colors.length >= MAX) return;
+    const rgb = randomColor();
+    state.colors.push({ rgb, hex:toHex(rgb) });
+    renderPalette(); say('Added ' + toHex(rgb));
+  });
+  $('btnRemove').addEventListener('click', () => {
+    if(state.colors.length <= MIN) return;
+    const gone = state.colors.pop();
+    renderPalette(); say('Removed ' + gone.hex);
+  });
+  $('btnApply').addEventListener('click', () => {
+    const tokens = $('paste').value.split(/[\s,;]+/).filter(Boolean);
+    const found = tokens.map(parseHex).filter(Boolean);
+    if(found.length < MIN){ say('Add at least 2 valid HEX codes, like #3F6FA8.'); return; }
+    const used = found.slice(0, MAX);
+    state.colors = used.map(rgb => ({ rgb, hex:toHex(rgb) }));
+    renderPalette();
+    say('Loaded ' + used.length + ' colors' + (found.length > MAX ? ' (the first 8 of ' + found.length + ').' : '.'));
+  });
+
+  async function copyText(text){
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch(e){
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch(_){}
+      ta.remove(); return ok;
+    }
+  }
+  $('btnCopy').addEventListener('click', async () => {
+    const lines = ['Original: ' + state.colors.map(c => c.hex).join(', ')];
+    activeTypes().forEach(t => {
+      const M = matrix(t, state.sev / 100);
+      lines.push(conditionName(t, state.sev) + ': ' + state.colors.map(c => toHex(simulate(c.rgb, M))).join(', '));
+    });
+    const ok = await copyText(lines.join('\n'));
+    say(ok ? 'Copied ' + lines.length + ' rows of HEX codes.' : 'Copy failed. Select the codes from the swatches instead.');
+  });
+
+  /* ---------- image ---------- */
+  const cvO = $('cvOrig'), cvS = $('cvSim');
+  const ctxO = cvO.getContext('2d', { willReadFrequently:true }), ctxS = cvS.getContext('2d');
+  let pending = false;
+
+  function loadDrawable(src, w, h, name){
+    const k = Math.min(1, MAX_SIDE / Math.max(w, h));
+    const W = Math.max(1, Math.round(w * k)), H = Math.max(1, Math.round(h * k));
+    cvO.width = cvS.width = W; cvO.height = cvS.height = H;
+    ctxO.clearRect(0, 0, W, H);
+    ctxO.drawImage(src, 0, 0, W, H);
+    try { state.img = ctxO.getImageData(0, 0, W, H); }
+    catch(e){ say('Could not read that image. Try saving it as PNG or JPG first.'); return; }
+    state.imgName = name || 'image';
+    $('empty').hidden = true; $('empty').style.display = 'none';
+    $('imgstage').hidden = false;
+    $('btnPng').disabled = false;
+    processImage();
+    say('Loaded ' + state.imgName + (k < 1 ? ', scaled to ' + W + ' × ' + H + ' px.' : '.'));
+  }
+
+  function processImage(){
+    if(!state.img) return;
+    const src = state.img.data, out = ctxS.createImageData(state.img.width, state.img.height), dst = out.data;
+    const M = matrix(state.type === 'all' ? state.lastType : state.type, state.sev / 100);
+    const m00 = M[0][0], m01 = M[0][1], m02 = M[0][2],
+          m10 = M[1][0], m11 = M[1][1], m12 = M[1][2],
+          m20 = M[2][0], m21 = M[2][1], m22 = M[2][2];
+    const top = ENC_N - 1;
+    for(let i = 0; i < src.length; i += 4){
+      const r = LIN[src[i]], g = LIN[src[i + 1]], b = LIN[src[i + 2]];
+      let R = m00 * r + m01 * g + m02 * b, G = m10 * r + m11 * g + m12 * b, B = m20 * r + m21 * g + m22 * b;
+      dst[i]     = ENC[R <= 0 ? 0 : R >= 1 ? top : (R * top + .5) | 0];
+      dst[i + 1] = ENC[G <= 0 ? 0 : G >= 1 ? top : (G * top + .5) | 0];
+      dst[i + 2] = ENC[B <= 0 ? 0 : B >= 1 ? top : (B * top + .5) | 0];
+      dst[i + 3] = src[i + 3];
+    }
+    ctxS.putImageData(out, 0, 0);
+    updateMeta();
+  }
+  function scheduleImage(){
+    if(pending) return; pending = true;
+    requestAnimationFrame(() => { pending = false; processImage(); });
+  }
+
+  function loadFile(file){
+    if(!file || !/^image\//.test(file.type)){ say('That file is not an image. Use PNG, JPG, WebP or GIF.'); return; }
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { loadDrawable(img, img.naturalWidth, img.naturalHeight, file.name || 'pasted image'); URL.revokeObjectURL(url); };
+    img.onerror = () => { say('Could not open ' + (file.name || 'that image') + '. Try another file.'); URL.revokeObjectURL(url); };
+    img.src = url;
+  }
+
+  /* Generated test plate: a number drawn in orange dots over olive dots */
+  async function samplePlate(){
+    try { await document.fonts.ready; } catch(_){}
+    const S = 760, R = S * 0.46, cx = S / 2, cy = S / 2;
+    const mask = document.createElement('canvas'); mask.width = mask.height = S;
+    const mc = mask.getContext('2d');
+    mc.fillStyle = '#000'; mc.textAlign = 'center'; mc.textBaseline = 'middle';
+    mc.font = '700 360px "Space Grotesk", system-ui, sans-serif';
+    mc.fillText('74', cx, cy + 12);
+    const md = mc.getImageData(0, 0, S, S).data;
+
+    const cv = document.createElement('canvas'); cv.width = cv.height = S;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#0d0f14'; c.fillRect(0, 0, S, S);
+    const fig = ['#d9814f', '#e29a5c', '#c96f45', '#e6a86b', '#d4764a', '#cf8a55'];
+    const bg  = ['#8fa65a', '#7f9a4f', '#a3b36a', '#9aa85c', '#b5b879', '#86a061'];
+    const cell = 24, grid = new Map(), dots = [];
+    const key = (x, y) => ((x / cell) | 0) + ',' + ((y / cell) | 0);
+    for(let n = 0; n < 26000; n++){
+      const r = 3.5 + Math.pow(Math.random(), 1.6) * 10.5;
+      const x = cx + (Math.random() * 2 - 1) * R, y = cy + (Math.random() * 2 - 1) * R;
+      if(Math.hypot(x - cx, y - cy) + r > R) continue;
+      const gx = (x / cell) | 0, gy = (y / cell) | 0;
+      let hit = false;
+      for(let a = -1; a <= 1 && !hit; a++) for(let b = -1; b <= 1 && !hit; b++){
+        const bucket = grid.get((gx + a) + ',' + (gy + b));
+        if(bucket) for(const d of bucket){ if(Math.hypot(d.x - x, d.y - y) < d.r + r + 1.6){ hit = true; break; } }
+      }
+      if(hit) continue;
+      const d = { x, y, r };
+      const k = key(x, y); if(!grid.has(k)) grid.set(k, []); grid.get(k).push(d);
+      dots.push(d);
+    }
+    dots.forEach(d => {
+      const inside = md[(((d.y | 0) * S + (d.x | 0)) * 4) + 3] > 128;
+      const pal = inside ? fig : bg;
+      c.fillStyle = pal[(Math.random() * pal.length) | 0];
+      c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
+    });
+    loadDrawable(cv, S, S, 'sample plate');
+  }
+
+  $('btnChoose').addEventListener('click', () => $('file').click());
+  $('btnChoose2').addEventListener('click', () => $('file').click());
+  $('btnSample').addEventListener('click', samplePlate);
+  $('btnSample2').addEventListener('click', samplePlate);
+  $('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
+
+  /* drag and drop onto the stage */
+  const stage = $('stage'); let dragDepth = 0;
+  const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  stage.addEventListener('dragenter', e => { if(!hasFiles(e)) return; e.preventDefault(); dragDepth++; stage.classList.add('dragging'); });
+  stage.addEventListener('dragover', e => { if(hasFiles(e)) e.preventDefault(); });
+  stage.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if(!dragDepth) stage.classList.remove('dragging'); });
+  stage.addEventListener('drop', e => {
+    if(!hasFiles(e)) return;
+    e.preventDefault(); dragDepth = 0; stage.classList.remove('dragging');
+    setMode('image'); loadFile(e.dataTransfer.files[0]);
+  });
+  document.addEventListener('paste', e => {
+    const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find(it => it.type.startsWith('image/'));
+    if(!item) return;
+    e.preventDefault(); setMode('image'); loadFile(item.getAsFile());
+  });
+
+  /* split divider */
+  const compare = $('compare'), handle = $('handle');
+  function setSplit(p){
+    state.split = clamp(p, 0, 100);
+    compare.style.setProperty('--x', state.split + '%');
+    handle.setAttribute('aria-valuenow', Math.round(state.split));
+  }
+  let dragging = false;
+  const fromPointer = e => { const r = compare.getBoundingClientRect(); setSplit((e.clientX - r.left) / r.width * 100); };
+  compare.addEventListener('pointerdown', e => {
+    if(state.view !== 'split') return;
+    dragging = true; compare.setPointerCapture(e.pointerId); fromPointer(e); handle.focus({ preventScroll:true });
+  });
+  compare.addEventListener('pointermove', e => { if(dragging) fromPointer(e); });
+  compare.addEventListener('pointerup', () => { dragging = false; });
+  compare.addEventListener('pointercancel', () => { dragging = false; });
+  handle.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 10 : 2;
+    if(e.key === 'ArrowLeft' || e.key === 'ArrowDown'){ e.preventDefault(); setSplit(state.split - step); }
+    else if(e.key === 'ArrowRight' || e.key === 'ArrowUp'){ e.preventDefault(); setSplit(state.split + step); }
+    else if(e.key === 'Home'){ e.preventDefault(); setSplit(0); }
+    else if(e.key === 'End'){ e.preventDefault(); setSplit(100); }
+  });
+
+  $('viewGrid').addEventListener('click', e => {
+    const b = e.target.closest('button.tool'); if(!b) return;
+    state.view = b.dataset.view;
+    pressOnly($('viewGrid'), b);
+    compare.className = 'compare ' + state.view;
+    updateMeta();
+  });
+
+  $('btnPng').addEventListener('click', () => {
+    if(!state.img) return;
+    const t = state.type === 'all' ? state.lastType : state.type;
+    const base = state.imgName.replace(/\.[a-z0-9]+$/i, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'image';
+    const name = base + '-' + TYPES[t].full.toLowerCase() + '-' + state.sev + '.png';
+    cvS.toBlob(blob => {
+      if(!blob){ say('Could not create the PNG. Try again.'); return; }
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      say('Downloaded ' + name);
+    }, 'image/png');
+  });
+
+  /* ---------- shared controls ---------- */
+  function pressOnly(group, btn){
+    group.querySelectorAll('button.tool').forEach(x => {
+      const on = x === btn; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on);
+    });
+  }
+  function syncTypeButtons(){
+    const btn = $('typeGrid').querySelector('[data-type="' + state.type + '"]');
+    pressOnly($('typeGrid'), btn);
+    $('typeHint').textContent = state.type === 'all' ? ALL_HINT : TYPES[state.type].hint;
+  }
+
+  function setMode(mode){
+    if(state.mode === mode) return;
+    state.mode = mode;
+    $('app').dataset.mode = mode;
+    pressOnly($('modeGrid'), $('modeGrid').querySelector('[data-mode="' + mode + '"]'));
+    if(mode === 'image' && state.type === 'all'){ state.type = state.lastType; }
+    syncTypeButtons();
+    if(mode === 'palette') renderPalette(); else processImage();
+    updateMeta();
+  }
+  $('modeGrid').addEventListener('click', e => {
+    const b = e.target.closest('button.tool'); if(b) setMode(b.dataset.mode);
+  });
+
+  $('typeGrid').addEventListener('click', e => {
+    const b = e.target.closest('button.tool'); if(!b) return;
+    const prevMany = state.type === 'all';
+    state.type = b.dataset.type;
+    if(state.type !== 'all') state.lastType = state.type;
+    syncTypeButtons();
+    if(state.mode === 'palette') renderPalette(); else scheduleImage();
+    if(prevMany !== (state.type === 'all')) say('');
+  });
+
+  $('sev').addEventListener('input', e => {
+    state.sev = +e.target.value;
+    $('sevVal').textContent = state.sev;
+    if(state.mode === 'palette') paint(); else scheduleImage();
+  });
+
+  function updateMeta(){
+    if(state.mode === 'palette'){
+      const n = state.colors.length;
+      $('dims').textContent = n + ' colors, ' + (state.type === 'all'
+        ? 'all types at ' + state.sev + '%'
+        : conditionName(state.type, state.sev).toLowerCase());
+      $('tip').textContent = 'Click a color to change it';
+    } else {
+      const t = state.type === 'all' ? state.lastType : state.type;
+      $('simCap').textContent = conditionName(t, state.sev);
+      if(state.img){
+        $('dims').textContent = state.img.width + ' × ' + state.img.height + ' px, ' + conditionName(t, state.sev).toLowerCase();
+        $('tip').textContent = state.view === 'split' ? 'Drag the divider to compare' : 'Original on the left';
+      } else {
+        $('dims').textContent = 'No image loaded';
+        $('tip').textContent = 'Drop, paste or choose an image';
+      }
+    }
+  }
+
+  /* ---------- init ---------- */
+  setSplit(50);
+  syncTypeButtons();
+  renderPalette();
+})();
+</script>
+</body>
+</html>
